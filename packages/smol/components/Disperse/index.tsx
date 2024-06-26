@@ -8,6 +8,7 @@ import {useChainID} from '@builtbymom/web3/hooks/useChainID';
 import {cl, toAddress, toNormalizedBN} from '@builtbymom/web3/utils';
 import {useDownloadFile} from '@smolHooks/useDownloadFile';
 import {SmolTokenSelector} from '@lib/common/SmolTokenSelector';
+import {UploadFileModal} from '@lib/common/UploadFileModal';
 import {usePrices} from '@lib/contexts/usePrices';
 import {useValidateAddressInput} from '@lib/hooks/useValidateAddressInput';
 import {useValidateAmountInput} from '@lib/hooks/useValidateAmountInput';
@@ -24,7 +25,7 @@ import {useDisperseQueryManagement} from './useDisperseQuery';
 import {DisperseWizard} from './Wizard';
 
 import type {AxiosResponse} from 'axios';
-import type {ChangeEvent, ComponentPropsWithoutRef, ReactElement} from 'react';
+import type {ComponentPropsWithoutRef, ReactElement} from 'react';
 import type {TAddress, TNormalizedBN, TToken} from '@builtbymom/web3/types';
 import type {TDisperseInput} from '@lib/types/app.disperse';
 
@@ -44,11 +45,40 @@ function ImportConfigurationButton({onSelectToken}: {onSelectToken: (token: TTok
 
 	const [importedTokenToSend, set_importedTokenToSend] = useState<string | undefined>(undefined);
 	const [records, set_records] = useState<TRecord[] | undefined>(undefined);
+	const [isOpen, set_isOpen] = useState(false);
+
+	const [files, set_files] = useState<Blob[] | undefined>(undefined);
+
+	const onDrop = useCallback((acceptedFiles: Blob[]) => {
+		set_files(acceptedFiles);
+	}, []);
+
+	const downloadFile = async (): Promise<AxiosResponse<Blob>> => {
+		const url =
+			'https://chocolate-gleaming-armadillo-579.mypinata.cloud/ipfs/QmQDj9Cwxx8YABPfbt65LvttrVGeb5qDG8Q6TPJDHy4Li2';
+
+		return axios.get(url, {
+			responseType: 'blob'
+		});
+	};
+
+	const {download: downloadTemplate} = useDownloadFile({
+		apiDefinition: downloadFile,
+		fileName: 'smol-disperse-template',
+		fileType: 'csv'
+	});
 
 	/** Token in URL may not be present in csv file, so better to be fetched  */
 	const {data: initialTokenRaw} = useBalances({
 		tokens: [{address: toAddress(importedTokenToSend), chainID: safeChainID}]
 	});
+
+	useEffect(() => {
+		if (!files) {
+			return;
+		}
+		handleFileUpload(files);
+	}, [files]);
 
 	const initialToken = useMemo((): TToken | undefined => {
 		return initialTokenRaw[safeChainID] && importedTokenToSend
@@ -75,11 +105,11 @@ function ImportConfigurationButton({onSelectToken}: {onSelectToken: (token: TTok
 		dispatchConfiguration({type: 'CLEAR_RECEIVERS', payload: undefined});
 	};
 
-	const handleFileUpload = (e: ChangeEvent<HTMLInputElement>): void => {
-		if (!e.target.files) {
+	const handleFileUpload = (files: Blob[]): void => {
+		if (!files) {
 			return;
 		}
-		const [file] = e.target.files as unknown as Blob[];
+		const [file] = files as unknown as Blob[];
 		const reader = new FileReader();
 		reader.onload = event => {
 			if (!event?.target?.result) {
@@ -114,6 +144,8 @@ function ImportConfigurationButton({onSelectToken}: {onSelectToken: (token: TTok
 			}
 		};
 		reader.readAsBinaryString(file);
+
+		set_isOpen(false);
 	};
 
 	/** Set imported token from url if present */
@@ -151,24 +183,41 @@ function ImportConfigurationButton({onSelectToken}: {onSelectToken: (token: TTok
 	}, [initialToken]);
 
 	return (
-		<Button
-			onClick={() => {
-				plausible(PLAUSIBLE_EVENTS.DISPERSE_IMPORT_CONFIG);
-				document.querySelector<HTMLInputElement>('#file-upload')?.click();
-			}}
-			className={'!h-8 py-1.5 !text-xs'}>
-			<input
-				id={'file-upload'}
-				tabIndex={-1}
-				className={'absolute inset-0 !cursor-pointer opacity-0'}
-				type={'file'}
-				accept={'.csv'}
-				onClick={event => event.stopPropagation()}
-				onChange={handleFileUpload}
+		<>
+			<Button
+				onClick={() => {
+					set_isOpen(true);
+				}}
+				className={'!h-8 py-1.5 !text-xs'}>
+				<IconImport className={'mr-2 size-3 text-neutral-900'} />
+				{'Import Configuration'}
+			</Button>
+			<UploadFileModal
+				isOpen={isOpen}
+				onClose={() => set_isOpen(false)}
+				onBrowse={() => {
+					plausible(PLAUSIBLE_EVENTS.AB_IMPORT_CONTACTS);
+					document.querySelector<HTMLInputElement>('#file-upload')?.click();
+				}}
+				title={'Upload disperse configuration'}
+				description={
+					<div className={'text-md'}>
+						<p>
+							{'Upload a CSV with existing addresses to add them to your Smol address book. '}
+							{'Download the '}
+							<button
+								onClick={downloadTemplate}
+								className={'underline'}>
+								{'template'}
+							</button>
+							{' for correct formatting.'}
+						</p>
+					</div>
+				}
+				handleUpload={handleFileUpload}
+				onDrop={onDrop}
 			/>
-			<IconImport className={'mr-2 size-3 text-neutral-900'} />
-			{'Import Configuration'}
-		</Button>
+		</>
 	);
 }
 
@@ -286,7 +335,7 @@ const Disperse = memo(function Disperse(): ReactElement {
 	}, [hasInitialInputs]);
 
 	return (
-		<div className={'w-full'}>
+		<div className={'size-full'}>
 			<div className={'mb-4 flex flex-wrap gap-2 text-xs'}>
 				<ImportConfigurationButton onSelectToken={onSelectToken} />
 				<ExportConfigurationButton className={'!h-8 !text-xs'} />

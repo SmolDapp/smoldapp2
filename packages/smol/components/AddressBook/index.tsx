@@ -1,9 +1,10 @@
-import {useCallback, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useState} from 'react';
 import {usePlausible} from 'next-plausible';
 import Papa from 'papaparse';
 import {LayoutGroup, motion} from 'framer-motion';
 import {cl, toAddress} from '@builtbymom/web3/utils';
 import {AddressBookEntry} from '@lib/common/AddressBookEntry';
+import {UploadFileModal} from '@lib/common/UploadFileModal';
 import {useAddressBook} from '@lib/contexts/useAddressBook';
 import {IconAppAddressBook} from '@lib/icons/IconApps';
 import {IconEmptyAddressBook} from '@lib/icons/IconEmptyAddressBook';
@@ -12,7 +13,7 @@ import {IconPlus} from '@lib/icons/IconPlus';
 import {TextInput} from '@lib/primitives/TextInput';
 import {PLAUSIBLE_EVENTS} from '@lib/utils/plausible';
 
-import type {ChangeEvent, ReactElement} from 'react';
+import type {ReactElement} from 'react';
 import type {TAddress} from '@builtbymom/web3/types';
 import type {TAddressBookEntry} from '@lib/types/AddressBook';
 
@@ -33,12 +34,50 @@ function AddContactButton(props: {onOpenCurtain: VoidFunction; label?: string}):
 function ImportContactsButton(props: {className?: string}): ReactElement {
 	const plausible = usePlausible();
 	const {addEntry} = useAddressBook();
+	const [isOpen, set_isOpen] = useState<boolean>(false);
 
-	const handleFileUpload = (e: ChangeEvent<HTMLInputElement>): void => {
-		if (!e.target.files) {
+	const [files, set_files] = useState<Blob[] | undefined>(undefined);
+
+	const onDrop = useCallback((acceptedFiles: Blob[]) => {
+		set_files(acceptedFiles);
+	}, []);
+
+	const {listEntries} = useAddressBook();
+
+	const downloadEntries = useCallback(async () => {
+		const entries = await listEntries();
+		const clonedEntries = structuredClone(entries);
+		//Remove id and ens from the entries
+		const entriesWithoutId = clonedEntries
+			.filter(entry => !entry.isHidden)
+			.map(entry => {
+				const {id, ens, slugifiedLabel, numberOfInteractions, tags, isHidden, ...rest} = entry;
+				id;
+				ens;
+				slugifiedLabel;
+				numberOfInteractions;
+				tags;
+				isHidden;
+				return rest;
+			});
+		const csv = Papa.unparse(entriesWithoutId, {header: true});
+		const blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
+		const url = window.URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		const name = `smol-address-book-${new Date().toISOString().split('T')[0]}.csv`;
+		a.setAttribute('hidden', '');
+		a.setAttribute('href', url);
+		a.setAttribute('download', name);
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+	}, [listEntries]);
+
+	const handleFileUpload = (files?: Blob[]): void => {
+		if (!files) {
 			return;
 		}
-		const [file] = e.target.files as unknown as Blob[];
+		const [file] = files as unknown as Blob[];
 		const reader = new FileReader();
 		reader.onload = event => {
 			if (!event?.target?.result) {
@@ -114,30 +153,53 @@ function ImportContactsButton(props: {className?: string}): ReactElement {
 			}
 		};
 		reader.readAsBinaryString(file);
+
+		set_isOpen(false);
 	};
+
+	useEffect(() => {
+		if (!files) {
+			return;
+		}
+		handleFileUpload(files);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [files]);
 
 	return (
 		<button
-			onClick={() => {
-				plausible(PLAUSIBLE_EVENTS.AB_IMPORT_CONTACTS);
-				document.querySelector<HTMLInputElement>('#file-upload')?.click();
-			}}
+			onClick={() => set_isOpen(true)}
 			className={cl(
 				props.className,
 				'rounded-lg p-2 text-xs flex flex-row items-center relative overflow-hidden',
 				'bg-neutral-300 text-neutral-900 transition-colors hover:bg-neutral-400'
 			)}>
-			<input
-				id={'file-upload'}
-				tabIndex={-1}
-				className={'absolute inset-0 !cursor-pointer opacity-0'}
-				type={'file'}
-				accept={'.csv'}
-				onClick={event => event.stopPropagation()}
-				onChange={handleFileUpload}
-			/>
 			<IconImport className={'mr-2 size-3 text-neutral-900'} />
 			{'Import Contacts'}
+			<UploadFileModal
+				isOpen={isOpen}
+				onClose={(): void => set_isOpen(false)}
+				onBrowse={() => {
+					plausible(PLAUSIBLE_EVENTS.AB_IMPORT_CONTACTS);
+					document.querySelector<HTMLInputElement>('#file-upload')?.click();
+				}}
+				title={'Upload addresses'}
+				description={
+					<div className={'text-md'}>
+						<p>{'Upload a CSV with existing addresses to add them to your Smol address book. '}</p>{' '}
+						<p>
+							{'Download the '}
+							<button
+								onClick={downloadEntries}
+								className={'underline'}>
+								{'template'}
+							</button>
+							{' for correct formatting.'}
+						</p>
+					</div>
+				}
+				handleUpload={handleFileUpload}
+				onDrop={onDrop}
+			/>
 		</button>
 	);
 }
